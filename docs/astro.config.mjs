@@ -12,9 +12,12 @@ export default defineConfig({
       },
       sidebar: [
         {
+          label: 'Introduction',
+          link: '/intro/',
+        },
+        {
           label: 'Getting Started',
           items: [
-            { label: 'Introduction', link: '/intro/' },
             { label: 'Quick Start', link: '/getting-started/quick-start/' },
             { label: 'Installation', link: '/getting-started/installation/' },
             { label: 'Configuration', link: '/getting-started/configuration/' },
@@ -92,7 +95,6 @@ export default defineConfig({
           label: 'Development',
           items: [
             { label: 'Setup', link: '/development/setup/' },
-            { label: 'Contributing', link: '/development/contributing/' },
             { label: 'Testing', link: '/development/testing/' },
           ],
         },
