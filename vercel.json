@@ -1,6 +1,0 @@
-{
-  "buildCommand": "cd docs && npm install --legacy-peer-deps && npm run build",
-  "outputDirectory": "docs/dist",
-  "installCommand": "cd docs && npm install --legacy-peer-deps"
-}
-
