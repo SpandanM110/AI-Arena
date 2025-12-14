@@ -8,7 +8,7 @@ export default defineConfig({
       title: 'AI Red vs Blue Arena',
       description: 'Complete documentation for the AI Red vs Blue Arena platform',
       social: {
-        github: 'https://github.com/your-org/ai-arena',
+        github: 'https://github.com/SpandanM110/AI-Arena',
       },
       sidebar: [
         {
