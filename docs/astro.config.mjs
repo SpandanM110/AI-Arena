@@ -17,93 +17,63 @@ export default defineConfig({
         },
         {
           label: 'Getting Started',
-          items: [
-            { label: 'Quick Start', link: '/getting-started/quick-start/' },
-            { label: 'Installation', link: '/getting-started/installation/' },
-            { label: 'Configuration', link: '/getting-started/configuration/' },
-          ],
+          autogenerate: {
+            directory: 'getting-started',
+          },
         },
         {
           label: 'Architecture',
-          items: [
-            { label: 'Overview', link: '/architecture/overview/' },
-            { label: 'System Design', link: '/architecture/system-design/' },
-            { label: 'Data Flow', link: '/architecture/data-flow/' },
-          ],
+          autogenerate: {
+            directory: 'architecture',
+          },
         },
         {
           label: 'Backend',
-          items: [
-            { label: 'Overview', link: '/backend/overview/' },
-            { label: 'Agents', link: '/backend/agents/' },
-            { label: 'Routes & API', link: '/backend/routes/' },
-            { label: 'Database', link: '/backend/database/' },
-            { label: 'Orchestration', link: '/backend/orchestration/' },
-            { label: 'Scoring System', link: '/backend/scoring/' },
-            { label: 'WebSocket Server', link: '/backend/websocket/' },
-          ],
+          autogenerate: {
+            directory: 'backend',
+          },
         },
         {
           label: 'Frontend',
-          items: [
-            { label: 'Overview', link: '/frontend/overview/' },
-            { label: 'Pages', link: '/frontend/pages/' },
-            { label: 'Components', link: '/frontend/components/' },
-            { label: 'API Client', link: '/frontend/api-client/' },
-          ],
+          autogenerate: {
+            directory: 'frontend',
+          },
         },
         {
           label: 'Integrations',
-          items: [
-            { label: 'Cline', link: '/integrations/cline/' },
-            { label: 'Kestra', link: '/integrations/kestra/' },
-            { label: 'Groq Models', link: '/integrations/groq/' },
-            { label: 'Oumi', link: '/integrations/oumi/' },
-          ],
+          autogenerate: {
+            directory: 'integrations',
+          },
         },
         {
           label: 'API Reference',
-          items: [
-            { label: 'Agents API', link: '/api/agents/' },
-            { label: 'Matches API', link: '/api/matches/' },
-            { label: 'Events API', link: '/api/events/' },
-            { label: 'WebSocket API', link: '/api/websocket/' },
-            { label: 'Config API', link: '/api/config/' },
-            { label: 'Kestra API', link: '/api/kestra/' },
-            { label: 'Oumi API', link: '/api/oumi/' },
-          ],
+          autogenerate: {
+            directory: 'api',
+          },
         },
         {
           label: 'Guides',
-          items: [
-            { label: 'Creating Agents', link: '/guides/creating-agents/' },
-            { label: 'Running Matches', link: '/guides/running-matches/' },
-            { label: 'Tool Execution', link: '/guides/tool-execution/' },
-            { label: 'Fine-tuning', link: '/guides/fine-tuning/' },
-          ],
+          autogenerate: {
+            directory: 'guides',
+          },
         },
         {
           label: 'Deployment',
-          items: [
-            { label: 'Overview', link: '/deployment/overview/' },
-            { label: 'Backend Deployment', link: '/deployment/backend/' },
-            { label: 'Frontend Deployment', link: '/deployment/frontend/' },
-            { label: 'Kestra Setup', link: '/deployment/kestra/' },
-          ],
+          autogenerate: {
+            directory: 'deployment',
+          },
         },
         {
           label: 'Development',
-          items: [
-            { label: 'Setup', link: '/development/setup/' },
-            { label: 'Testing', link: '/development/testing/' },
-          ],
+          autogenerate: {
+            directory: 'development',
+          },
         },
         {
           label: 'Troubleshooting',
-          items: [
-            { label: 'Common Issues', link: '/troubleshooting/common-issues/' },
-            { label: 'Debugging', link: '/troubleshooting/debugging/' },
-          ],
+          autogenerate: {
+            directory: 'troubleshooting',
+          },
         },
       ],
     }),
