@@ -1,0 +1,146 @@
+id: agent-fine-tuning
+labels:
+  name: Agent Fine-tuning Pipeline
+  type: oumi-integration
+
+description: |
+  # Agent Fine-tuning Pipeline Flow
+  **Use case:** Complete pipeline from dataset generation to model deployment.
+  **Highlights:**
+  - Generates training dataset from recent matches
+  - Submits fine-tuning job to Oumi
+  - Monitors training progress
+  - Validates new model performance
+  - Updates agent configuration
+
+inputs:
+  - id: agent_id
+    type: STRING
+    description: Agent ID to fine-tune
+    required: true
+
+  - id: agent_type
+    type: STRING
+    description: Type of agent (red/blue/target)
+    required: true
+
+  - id: training_matches_count
+    type: INT
+    description: Number of recent matches to use for training
+    defaults: 50
+
+  - id: fine_tuning_config
+    type: JSON
+    description: Fine-tuning configuration
+    required: false
+    defaults:
+      epochs: 3
+      learning_rate: 0.0001
+      batch_size: 8
+
+tasks:
+  - id: get_recent_matches
+    type: io.kestra.plugin.core.http.Request
+    description: Get recent matches for training
+    uri: "{{ env.ARENA_API_URL }}/api/matches?limit={{ inputs.training_matches_count }}"
+    method: GET
+
+  - id: extract_match_ids
+    type: io.kestra.plugin.scripts.python.Script
+    description: Extract match IDs
+    containerImage: python:3.11-alpine
+    inputFiles:
+      matches.json: "{{ outputs.get_recent_matches.body }}"
+    script: |
+      import json
+
+      with open("matches.json", "r") as f:
+          matches = json.load(f)
+
+      match_ids = [m["id"] for m in matches]
+
+      with open("match_ids.json", "w") as f:
+          json.dump(match_ids, f)
+
+  - id: generate_dataset
+    type: io.kestra.plugin.core.flow.Subflow
+    description: Generate training dataset
+    flowId: dataset-generation
+    inputs:
+      match_ids: "{{ outputs.extract_match_ids.outputFiles['match_ids.json'] }}"
+      min_severity: 5.0
+      export_format: jsonl
+
+  - id: submit_fine_tuning
+    type: io.kestra.plugin.core.http.Request
+    description: Submit fine-tuning job to Oumi
+    uri: "{{ env.ARENA_API_URL }}/api/oumi/fine-tune"
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "agentId": "{{ inputs.agent_id }}",
+        "datasetId": "{{ outputs.generate_dataset.outputs.dataset_file }}",
+        "config": {{ inputs.fine_tuning_config }}
+      }
+
+  - id: monitor_training
+    type: io.kestra.plugin.core.http.Request
+    description: Monitor fine-tuning job progress
+    uri: "{{ env.ARENA_API_URL }}/api/oumi/fine-tune/{{ outputs.submit_fine_tuning.body.jobId }}"
+    method: GET
+    retry:
+      type: exponential
+      maxAttempt: 200
+      interval: PT30S
+      maxInterval: PT5M
+
+  - id: validate_model
+    type: io.kestra.plugin.core.flow.Subflow
+    description: Run validation matches with new model
+    flowId: match-orchestration
+    inputs:
+      red_agent_id: "{{ inputs.agent_type == 'red' ? inputs.agent_id : 'default-red' }}"
+      blue_agent_id: "{{ inputs.agent_type == 'blue' ? inputs.agent_id : 'default-blue' }}"
+      target_agent_id: "{{ inputs.agent_type == 'target' ? inputs.agent_id : 'default-target' }}"
+      match_mode: quick
+    condition: "{{ outputs.monitor_training.body.status == 'completed' }}"
+
+  - id: update_agent
+    type: io.kestra.plugin.core.http.Request
+    description: Update agent with new model
+    uri: "{{ env.ARENA_API_URL }}/api/agents/{{ inputs.agent_id }}"
+    method: PATCH
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "model": "{{ outputs.monitor_training.body.modelId }}",
+        "metadata": {
+          "fine_tuned": true,
+          "fine_tuning_job_id": "{{ outputs.submit_fine_tuning.body.jobId }}",
+          "fine_tuned_at": "{{ execution.startDate }}",
+          "validation_match_id": "{{ outputs.validate_model.outputs.match_id }}"
+        }
+      }
+    condition: "{{ outputs.validate_model.outputs.winner != null }}"
+
+  - id: log_completion
+    type: io.kestra.plugin.core.log.Log
+    description: Log fine-tuning completion
+    message: |
+      Fine-tuning completed for agent {{ inputs.agent_id }}
+      Job ID: {{ outputs.submit_fine_tuning.body.jobId }}
+      Model ID: {{ outputs.monitor_training.body.modelId }}
+      Validation Match: {{ outputs.validate_model.outputs.match_id }}
+
+outputs:
+  - id: job_id
+    value: "{{ outputs.submit_fine_tuning.body.jobId }}"
+  - id: model_id
+    value: "{{ outputs.monitor_training.body.modelId }}"
+  - id: validation_match_id
+    value: "{{ outputs.validate_model.outputs.match_id }}"
+
+

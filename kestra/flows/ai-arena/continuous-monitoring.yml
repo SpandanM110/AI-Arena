@@ -1,0 +1,132 @@
+id: continuous-monitoring
+labels:
+  name: Continuous Security Monitoring
+  type: monitoring
+
+description: |
+  # Continuous Security Monitoring Flow
+  **Use case:** 24/7 monitoring of target agents with automated alerting.
+  **Highlights:**
+  - Continuous match execution
+  - Real-time vulnerability detection
+  - Automated alerting on critical issues
+  - Performance trend tracking
+
+inputs:
+  - id: target_agent_id
+    type: STRING
+    description: Target agent to monitor
+    required: true
+
+  - id: monitoring_interval_minutes
+    type: INT
+    description: Minutes between monitoring matches
+    defaults: 60
+
+  - id: alert_threshold_severity
+    type: FLOAT
+    description: Severity threshold for alerts
+    defaults: 8.0
+
+tasks:
+  - id: get_red_agents
+    type: io.kestra.plugin.core.http.Request
+    description: Get available Red agents
+    uri: "{{ env.ARENA_API_URL }}/api/agents?type=red"
+    method: GET
+
+  - id: get_blue_agents
+    type: io.kestra.plugin.core.http.Request
+    description: Get available Blue agents
+    uri: "{{ env.ARENA_API_URL }}/api/agents?type=blue"
+    method: GET
+
+  - id: select_agents
+    type: io.kestra.plugin.scripts.python.Script
+    description: Select best agents for monitoring
+    containerImage: python:3.11-alpine
+    inputFiles:
+      red_agents.json: "{{ outputs.get_red_agents.body }}"
+      blue_agents.json: "{{ outputs.get_blue_agents.body }}"
+    script: |
+      import json
+
+      with open("red_agents.json", "r") as f:
+          red_agents = json.load(f)
+
+      with open("blue_agents.json", "r") as f:
+          blue_agents = json.load(f)
+
+      # Select most recent or best performing agents
+      selected = {
+          "red_agent_id": red_agents[0]["id"] if red_agents else None,
+          "blue_agent_id": blue_agents[0]["id"] if blue_agents else None
+      }
+
+      with open("selected.json", "w") as f:
+          json.dump(selected, f)
+
+  - id: run_monitoring_match
+    type: io.kestra.plugin.core.flow.Subflow
+    description: Run a monitoring match
+    flowId: match-orchestration
+    inputs:
+      red_agent_id: "{{ outputs.select_agents.outputFiles['selected.json'].red_agent_id }}"
+      blue_agent_id: "{{ outputs.select_agents.outputFiles['selected.json'].blue_agent_id }}"
+      target_agent_id: "{{ inputs.target_agent_id }}"
+      match_mode: quick
+
+  - id: check_severity
+    type: io.kestra.plugin.scripts.python.Script
+    description: Check if severity exceeds threshold
+    containerImage: python:3.11-alpine
+    inputFiles:
+      metrics.json: "{{ outputs.run_monitoring_match.outputs.metrics }}"
+    script: |
+      import json
+
+      with open("metrics.json", "r") as f:
+          metrics = json.load(f)
+
+      severity = metrics.get("average_severity", 0)
+      threshold = {{ inputs.alert_threshold_severity }}
+
+      alert_needed = severity >= threshold
+
+      result = {
+          "alert_needed": alert_needed,
+          "severity": severity,
+          "threshold": threshold,
+          "critical_count": metrics.get("critical_vulnerabilities", 0)
+      }
+
+      with open("alert_check.json", "w") as f:
+          json.dump(result, f)
+
+  - id: send_alert
+    type: io.kestra.plugin.core.http.Request
+    description: Send alert if threshold exceeded
+    uri: "{{ env.ARENA_API_URL }}/api/alerts"
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "match_id": "{{ outputs.run_monitoring_match.outputs.match_id }}",
+        "severity": "{{ outputs.check_severity.outputFiles['alert_check.json'].severity }}",
+        "critical_vulnerabilities": "{{ outputs.check_severity.outputFiles['alert_check.json'].critical_count }}"
+      }
+    ignoreFailure: true
+    condition: "{{ outputs.check_severity.outputFiles['alert_check.json'].alert_needed }}"
+
+triggers:
+  - id: start_monitoring
+    type: io.kestra.plugin.core.trigger.Flow
+    flowId: start-monitoring
+
+  - id: schedule_monitoring
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "*/{{ inputs.monitoring_interval_minutes }} * * * *"
+    timezone: UTC
+
+

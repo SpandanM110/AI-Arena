@@ -1,0 +1,97 @@
+id: scheduled-matches
+labels:
+  name: Scheduled Match Execution
+  type: scheduling
+
+description: |
+  # Scheduled Match Execution Flow
+  **Use case:** Automatically run matches on a schedule for continuous evaluation.
+  **Highlights:**
+  - Runs matches at specified intervals
+  - Supports multiple agent combinations
+  - Tracks match history and trends
+  - Generates periodic reports
+
+inputs:
+  - id: schedule_cron
+    type: STRING
+    description: Cron expression for match schedule
+    defaults: "0 */6 * * *"
+    required: false
+
+  - id: agent_combinations
+    type: ARRAY
+    itemType: JSON
+    description: List of agent combinations to test
+    required: false
+    defaults:
+      - red_agent_id: "default-red"
+        blue_agent_id: "default-blue"
+        target_agent_id: "default-target"
+
+tasks:
+  - id: get_available_agents
+    type: io.kestra.plugin.core.http.Request
+    description: Fetch available agents
+    uri: "{{ env.ARENA_API_URL }}/api/agents"
+    method: GET
+
+  - id: select_agent_combination
+    type: io.kestra.plugin.scripts.python.Script
+    description: Select agent combination for this run
+    containerImage: python:3.11-alpine
+    inputFiles:
+      agents.json: "{{ outputs.get_available_agents.body }}"
+    script: |
+      import json
+      import random
+
+      with open("agents.json", "r") as f:
+          agents = json.load(f)
+
+      red_agents = [a for a in agents if a["type"] == "red"]
+      blue_agents = [a for a in agents if a["type"] == "blue"]
+      target_agents = [a for a in agents if a["type"] == "target"]
+
+      if red_agents and blue_agents and target_agents:
+          combination = {
+              "red_agent_id": random.choice(red_agents)["id"],
+              "blue_agent_id": random.choice(blue_agents)["id"],
+              "target_agent_id": random.choice(target_agents)["id"]
+          }
+      else:
+          # Use defaults if available
+          combination = {
+              "red_agent_id": "{{ inputs.agent_combinations[0].red_agent_id }}",
+              "blue_agent_id": "{{ inputs.agent_combinations[0].blue_agent_id }}",
+              "target_agent_id": "{{ inputs.agent_combinations[0].target_agent_id }}"
+          }
+
+      with open("combination.json", "w") as f:
+          json.dump(combination, f)
+
+  - id: run_match
+    type: io.kestra.plugin.core.flow.Subflow
+    description: Execute match using match-orchestration flow
+    flowId: match-orchestration
+    inputs:
+      red_agent_id: "{{ outputs.select_agent_combination.outputFiles['combination.json'].red_agent_id }}"
+      blue_agent_id: "{{ outputs.select_agent_combination.outputFiles['combination.json'].blue_agent_id }}"
+      target_agent_id: "{{ outputs.select_agent_combination.outputFiles['combination.json'].target_agent_id }}"
+      match_mode: standard
+
+  - id: log_result
+    type: io.kestra.plugin.core.log.Log
+    description: Log scheduled match result
+    message: |
+      Scheduled match completed
+      Match ID: {{ outputs.run_match.outputs.match_id }}
+      Winner: {{ outputs.run_match.outputs.winner }}
+
+triggers:
+  - id: schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "{{ inputs.schedule_cron }}"
+    timezone: UTC
+
+

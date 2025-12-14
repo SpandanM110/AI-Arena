@@ -1,0 +1,69 @@
+services:
+  kestra:
+    image: kestra/kestra:latest
+    container_name: kestra
+    command: server standalone
+    ports:
+      - "8080:8080"
+    environment:
+      ARENA_API_URL: "${ARENA_API_URL:-http://host.docker.internal:3001}"
+      KESTRA_CONFIGURATION: |
+        kestra:
+          server:
+            basic:
+              enabled: false
+          repository:
+            type: memory
+          storage:
+            type: local
+            local:
+              base-path: "/app/storage"
+          url: http://localhost:8080/
+          variables:
+            ARENA_API_URL: "${ARENA_API_URL:-http://host.docker.internal:3001}"
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
+              delete-orphan: true
+            working-directory:
+              path: /tmp/kestra-wd
+              delete-orphan: true
+            docker:
+              enabled: true
+              host: "unix:///var/run/docker.sock"
+              pull-policy: IF_NOT_PRESENT
+              registries:
+                dockerhub:
+                  type: docker
+                  server: "docker.io"
+                  username: ""
+                  password: ""
+                  config-file: ""
+          plugins:
+            repositories:
+              - id: central
+                url: https://dl.kestra.io/repository/maven-releases/
+            enabled:
+              - core
+              - script
+              - http
+              - jdbc
+              - python
+          queue:
+            type: memory
+    volumes:
+      - ./flows:/app/flows
+      - kestra-storage:/app/storage
+      - kestra-tmp:/tmp/kestra-wd
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: "0:0"  # Run as root to avoid permission issues
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/configs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  kestra-storage:
+  kestra-tmp:
+

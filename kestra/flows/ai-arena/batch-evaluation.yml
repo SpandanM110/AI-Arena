@@ -1,0 +1,131 @@
+id: batch-evaluation
+labels:
+  name: Batch Agent Evaluation
+  type: evaluation
+
+description: |
+  # Batch Agent Evaluation Flow
+  **Use case:** Evaluate multiple agent combinations in parallel for comprehensive testing.
+  **Highlights:**
+  - Runs multiple matches in parallel
+  - Tests different agent combinations
+  - Aggregates results for comparison
+  - Generates evaluation report
+
+inputs:
+  - id: agent_combinations
+    type: ARRAY
+    itemType: JSON
+    description: List of agent combinations to test
+    required: true
+
+  - id: matches_per_combination
+    type: INT
+    description: Number of matches per combination
+    defaults: 3
+
+tasks:
+  - id: expand_combinations
+    type: io.kestra.plugin.scripts.python.Script
+    description: Expand combinations into match list
+    containerImage: python:3.11-alpine
+    inputFiles:
+      combinations.json: "{{ inputs.agent_combinations }}"
+    script: |
+      import json
+
+      combinations = {{ inputs.agent_combinations }}
+      matches_per = {{ inputs.matches_per_combination }}
+
+      match_list = []
+      for combo in combinations:
+          for i in range(matches_per):
+              match_list.append({
+                  "red_agent_id": combo["red_agent_id"],
+                  "blue_agent_id": combo["blue_agent_id"],
+                  "target_agent_id": combo["target_agent_id"],
+                  "match_id": f"{combo['red_agent_id']}-{combo['blue_agent_id']}-{i}"
+              })
+
+      with open("match_list.json", "w") as f:
+          json.dump(match_list, f)
+
+  - id: run_parallel_matches
+    type: io.kestra.plugin.core.flow.ForEachItem
+    description: Run matches in parallel
+    items: "{{ outputs.expand_combinations.outputFiles['match_list.json'] }}"
+    tasks:
+      - id: run_match
+        type: io.kestra.plugin.core.flow.Subflow
+        flowId: match-orchestration
+        inputs:
+          red_agent_id: "{{ items.red_agent_id }}"
+          blue_agent_id: "{{ items.blue_agent_id }}"
+          target_agent_id: "{{ items.target_agent_id }}"
+          match_mode: standard
+
+  - id: aggregate_results
+    type: io.kestra.plugin.scripts.python.Script
+    description: Aggregate all match results
+    containerImage: python:3.11-alpine
+    inputFiles:
+      results.json: "{{ outputs.run_parallel_matches }}"
+    outputFiles:
+      - "*.json"
+    script: |
+      import json
+      from collections import defaultdict
+
+      # Aggregate results by agent combination
+      results = {{ outputs.run_parallel_matches }}
+      
+      aggregated = defaultdict(lambda: {
+          "matches": [],
+          "total_matches": 0,
+          "red_wins": 0,
+          "blue_wins": 0,
+          "draws": 0,
+          "avg_severity": 0,
+          "total_attacks": 0,
+          "total_defenses": 0
+      })
+
+      for result in results:
+          combo_key = f"{result['red_agent_id']}-{result['blue_agent_id']}"
+          combo = aggregated[combo_key]
+          
+          combo["matches"].append(result["match_id"])
+          combo["total_matches"] += 1
+          
+          if result.get("winner") == "red":
+              combo["red_wins"] += 1
+          elif result.get("winner") == "blue":
+              combo["blue_wins"] += 1
+          else:
+              combo["draws"] += 1
+
+      # Calculate averages
+      for combo_key, combo in aggregated.items():
+          if combo["total_matches"] > 0:
+              combo["red_win_rate"] = (combo["red_wins"] / combo["total_matches"]) * 100
+              combo["blue_win_rate"] = (combo["blue_wins"] / combo["total_matches"]) * 100
+
+      with open("aggregated_results.json", "w") as f:
+          json.dump(dict(aggregated), f, indent=2)
+
+  - id: generate_report
+    type: io.kestra.plugin.core.log.Log
+    description: Generate evaluation report
+    message: |
+      Batch evaluation completed
+      Total matches: {{ outputs.run_parallel_matches | length }}
+      Combinations tested: {{ outputs.aggregate_results.outputFiles['aggregated_results.json'] | length }}
+      See aggregated_results.json for detailed analysis
+
+outputs:
+  - id: total_matches
+    value: "{{ outputs.run_parallel_matches | length }}"
+  - id: aggregated_results
+    value: "{{ outputs.aggregate_results.outputFiles['aggregated_results.json'] }}"
+
+

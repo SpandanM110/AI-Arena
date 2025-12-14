@@ -1,0 +1,141 @@
+id: dataset-generation
+labels:
+  name: Training Dataset Generation
+  type: oumi-integration
+
+description: |
+  # Training Dataset Generation Flow
+  **Use case:** Generate training datasets from match results for Oumi fine-tuning.
+  **Highlights:**
+  - Collects match data from specified time period
+  - Formats data for Oumi training
+  - Exports in multiple formats
+  - Validates dataset quality
+
+inputs:
+  - id: match_ids
+    type: ARRAY
+    itemType: STRING
+    description: Specific match IDs to include (optional)
+    required: false
+
+  - id: date_range_start
+    type: DATETIME
+    description: Start date for match collection
+    required: false
+
+  - id: date_range_end
+    type: DATETIME
+    description: End date for match collection
+    required: false
+
+  - id: min_severity
+    type: FLOAT
+    description: Minimum severity to include
+    defaults: 5.0
+
+  - id: export_format
+    type: STRING
+    description: Export format (json/jsonl/parquet)
+    defaults: json
+
+tasks:
+  - id: get_matches
+    type: io.kestra.plugin.core.http.Request
+    description: Fetch matches based on criteria
+    uri: "{{ env.ARENA_API_URL }}/api/matches?limit=1000"
+    method: GET
+
+  - id: filter_matches
+    type: io.kestra.plugin.scripts.python.Script
+    description: Filter matches by criteria
+    containerImage: python:3.11-alpine
+    inputFiles:
+      matches.json: "{{ outputs.get_matches.body }}"
+    script: |
+      import json
+      from datetime import datetime
+
+      with open("matches.json", "r") as f:
+          matches = json.load(f)
+
+      filtered = []
+      for match in matches:
+          # Filter by date range if provided
+          if "{{ inputs.date_range_start }}" and "{{ inputs.date_range_end }}":
+              match_date = datetime.fromisoformat(match.get("startedAt", "").replace("Z", "+00:00"))
+              start = datetime.fromisoformat("{{ inputs.date_range_start }}")
+              end = datetime.fromisoformat("{{ inputs.date_range_end }}")
+              if not (start <= match_date <= end):
+                  continue
+
+          # Filter by match IDs if provided
+          if "{{ inputs.match_ids }}" and match["id"] not in {{ inputs.match_ids }}:
+              continue
+
+          # Filter by severity
+          if match.get("score", {}).get("severity", 0) < {{ inputs.min_severity }}:
+              continue
+
+          filtered.append(match["id"])
+
+      with open("filtered_match_ids.json", "w") as f:
+          json.dump(filtered, f)
+
+  - id: export_datasets
+    type: io.kestra.plugin.core.http.Request
+    description: Export training datasets via Oumi API
+    uri: "{{ env.ARENA_API_URL }}/api/oumi/export-dataset"
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "matchIds": {{ outputs.filter_matches.outputFiles['filtered_match_ids.json'] }},
+        "format": "{{ inputs.export_format }}"
+      }
+
+  - id: validate_dataset
+    type: io.kestra.plugin.scripts.python.Script
+    description: Validate dataset quality
+    containerImage: python:3.11-alpine
+    inputFiles:
+      dataset.json: "{{ outputs.export_datasets.body }}"
+    script: |
+      import json
+
+      with open("dataset.json", "r") as f:
+          dataset = json.load(f)
+
+      validation = {
+          "total_samples": dataset.get("count", 0),
+          "has_attacks": any("attack" in str(sample) for sample in dataset.get("dataset", [])),
+          "has_defenses": any("defense" in str(sample) for sample in dataset.get("dataset", [])),
+          "has_targets": any("target" in str(sample) for sample in dataset.get("dataset", [])),
+          "valid": True
+      }
+
+      if validation["total_samples"] == 0:
+          validation["valid"] = False
+          validation["error"] = "Empty dataset"
+
+      with open("validation.json", "w") as f:
+          json.dump(validation, f, indent=2)
+
+  - id: save_dataset
+    type: io.kestra.plugin.core.log.Log
+    description: Save validated dataset
+    message: |
+      Dataset generated successfully
+      Samples: {{ outputs.validate_dataset.outputFiles['validation.json'].total_samples }}
+      Valid: {{ outputs.validate_dataset.outputFiles['validation.json'].valid }}
+
+outputs:
+  - id: dataset_file
+    value: "{{ outputs.export_datasets.body }}"
+  - id: validation
+    value: "{{ outputs.validate_dataset.outputFiles['validation.json'] }}"
+  - id: match_count
+    value: "{{ outputs.filter_matches.outputFiles['filtered_match_ids.json'] | length }}"
+
+
